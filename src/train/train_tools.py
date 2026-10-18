@@ -1,7 +1,7 @@
 import datetime
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -29,15 +29,22 @@ class TrainTools:
 
     training_config: TrainConfig
     method: Literal["sft", "dpo", "grpo"]
+    run_timestamp: str = field(init=False)
 
     def __post_init__(self):
+        self.run_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         self.model_dir = (
             Path(__file__).parent.parent.parent / "results" / "trained_models"
         )
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
     @cached_property
-    def save_name(self) -> Path:
+    def run_name(self) -> str:
+        """Unique name shared by experiment tracking and persisted artifacts."""
+        return f"{self.run_timestamp}_{self.save_name}"
+
+    @cached_property
+    def save_name(self) -> str:
         loss_type = self.training_config.training_args.get("loss_type")
         loss_type_suffix = f"_{loss_type}" if loss_type else ""
 
@@ -78,7 +85,7 @@ class TrainTools:
     def wandb_callback(self) -> WandbCallback:
         os.environ.setdefault("WANDB_PROJECT", self.training_config.wandb_project)
         os.environ.setdefault("WANDB_ENTITY", self.training_config.wandb_entity)
-        os.environ.setdefault("WANDB_NAME", self.save_name)
+        os.environ["WANDB_NAME"] = self.run_name
 
         os.environ.setdefault("WANDB_RUN_GROUP", self.training_config.wandb_run_group)
         if self.training_config.wandb_tags:
@@ -191,6 +198,7 @@ class TrainTools:
             raise ValueError("Unknown training method:", self.method)
 
         training_args.output_dir = self.model_dir / self.save_name
+        training_args.run_name = self.run_name
         training_args.hub_model_id = (
             self.training_config.hf_username + "/" + self.save_name
             if training_args.push_to_hub
@@ -211,8 +219,7 @@ class TrainTools:
             move_to = self.training_config.move_to
             src_dir = self.model_dir / self.save_name
             if move_to is not None and move_to != "":
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                dest_dir = Path(move_to) / f"{timestamp}_{self.save_name}"
+                dest_dir = Path(move_to) / self.run_name
 
                 dest_dir.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(src_dir, dest_dir)

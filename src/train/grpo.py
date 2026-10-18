@@ -80,16 +80,14 @@ class GRPOTrainerDebug(GRPOTrainer):
         if self.accelerator.is_main_process:
             warnings.warn("Debug GRPOTrainer active: Extended logging enabled.")
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
         # Setup logging directory
         if self.train_tools is not None:
-            dir_name = f"{timestamp}_{self.train_tools.save_name}"
+            dir_name = self.train_tools.run_name
             print(
                 f"The model will be saved to: {HfApi().whoami()['name']}/{self.train_tools.save_name}"
             )
         else:
-            dir_name = timestamp
+            dir_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         if self.train_tools is not None:
             base_log_dir = Path(self.train_tools.training_config.grpo_debug_log_dir)
