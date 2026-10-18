@@ -10,9 +10,8 @@ benchmarks (MATH, CWEval).
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
-
 import wandb
+from pydantic import BaseModel, Field, model_validator
 
 
 class TrainingTypes(Enum):
@@ -69,6 +68,43 @@ class MixupStrategies(Enum):
     TARGETED = "targeted"  # Flip only for items selected by a targeted selector
 
 
+class AuditingStrategies(Enum):
+    """Strategies for selecting verifier-positive responses to audit."""
+
+    NONE = "none"
+    UNIFORM = "uniform"
+
+
+class AuditingConfig(BaseModel):
+    """Configuration for correcting verifier rewards with trusted labels."""
+
+    strategy: AuditingStrategies = Field(
+        default=AuditingStrategies.NONE,
+        description="How verifier-positive responses are selected for auditing",
+    )
+    budget_per_batch: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Maximum number of verifier-positive responses audited per reward-function call"
+        ),
+    )
+    seed: int = Field(default=42, description="Random seed used by the auditor")
+
+    @model_validator(mode="after")
+    def validate_budget(self) -> "AuditingConfig":
+        if self.strategy == AuditingStrategies.UNIFORM and self.budget_per_batch < 1:
+            raise ValueError("uniform auditing requires budget_per_batch >= 1")
+        return self
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "budget_per_batch": self.budget_per_batch,
+            "seed": self.seed,
+        }
+
+
 class AlternationConfig(BaseModel):
     """
     Configure periodic alternation of reward/verifier rules at the step level.
@@ -78,6 +114,7 @@ class AlternationConfig(BaseModel):
       - each rule has a `count` and `type` ("oracle" or "noisy")
       - noisy rules can override TPR/FPR/strategy/targeted_buckets
     """
+
     period: int = Field(
         default=1, gt=0, description="Alternation period length in steps"
     )
@@ -94,6 +131,7 @@ class AlternationConfig(BaseModel):
             "strategy?: 'uniform'|'format'|'targeted', targeted_buckets?: list}."
         ),
     )
+
 
 class MixupConfig(BaseModel):
     """
@@ -212,6 +250,10 @@ class TrainConfig(BaseModel):
     mixup: MixupConfig = Field(
         default=MixupConfig(),
         description="Configuration for the mixup of positive and negative samples",
+    )
+    auditing: AuditingConfig = Field(
+        default_factory=AuditingConfig,
+        description="Optional trusted-label auditing applied after verifier noise",
     )
     shuffle: bool = True
     max_length: int = 1024

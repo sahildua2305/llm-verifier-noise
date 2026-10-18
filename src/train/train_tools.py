@@ -15,6 +15,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 from transformers.integrations import NeptuneCallback, WandbCallback
 from trl import DPOConfig, GRPOConfig
 
+from src.auditing import Auditor
 from src.configs import TrainConfig
 from src.data import get_dataset
 from src.data.base import MixedUpDataset, Mixup
@@ -171,7 +172,12 @@ class TrainTools:
 
     @cached_property
     def dataset(self) -> MixedUpDataset:
-        mixup = Mixup(**self.training_config.mixup.to_dict())
+        auditor = Auditor(**self.training_config.auditing.to_dict())
+        if auditor.active and self.training_config.dataset != "rgym":
+            raise ValueError(
+                "Auditing is currently supported only for the rgym dataset"
+            )
+        mixup = Mixup(**self.training_config.mixup.to_dict(), auditor=auditor)
         dataset_kwargs = {
             **self.training_config.dataset_args,
             **self.training_config.verifier_args,

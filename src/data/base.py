@@ -9,13 +9,14 @@ interfaces for different training paradigms.
 import re
 import warnings
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 import numpy as np
 from datasets import Dataset
 from transformers import PreTrainedTokenizerBase
 
+from src.auditing import Auditor
 from src.configs import MixupStrategies
 from src.reward_almost_correct import (
     calc_relerr,
@@ -68,6 +69,7 @@ class Mixup:
     alternation: dict[str, Any] | None = (
         None  # optional periodic schedule for oracle/noisy rules by step
     )
+    auditor: Auditor = field(default_factory=Auditor)
 
     # Optional tokenizer, used for token-id based selectors on completion_full.
     # This is set by MixedUpDataset when available.

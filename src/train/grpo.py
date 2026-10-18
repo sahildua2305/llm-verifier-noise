@@ -32,6 +32,8 @@ def grpo(training_config: TrainConfig) -> None:
 
     grpo_dataset, reward_function = dataset.prepare_for_grpo()
     reward_function._oracle_rewards = []
+    reward_function._verifier_rewards = []
+    reward_function._audit_mask = []
     reward_function._gt_answers = []
     reward_function._verifier_reasoning = []
     reward_function._rubrics = []
@@ -54,6 +56,7 @@ def grpo(training_config: TrainConfig) -> None:
         processing_class=tokenizer,
         reward_funcs=reward_function,
         mixup=dataset.mixup,
+        auditor=dataset.mixup.auditor,
         train_tools=train_tools,
         callbacks=(callbacks if len(callbacks) > 0 else None),
         peft_config=peft_config,
@@ -65,6 +68,7 @@ def grpo(training_config: TrainConfig) -> None:
 class GRPOTrainerDebug(GRPOTrainer):
     def __init__(self, *args, **kwargs):
         self.mixup = kwargs.pop("mixup", None)
+        self.auditor = kwargs.pop("auditor", None)
         self.train_tools = kwargs.pop("train_tools", None)
         super().__init__(*args, **kwargs)
 
@@ -267,6 +271,61 @@ class GRPOTrainerDebug(GRPOTrainer):
 
         return global_flg_alternation
 
+    def _compute_global_audit_stats(self) -> Optional[Dict[str, float]]:
+        """Aggregate uniform-auditing counters across all processes."""
+        device = self.accelerator.device
+        active = bool(self.auditor is not None and self.auditor.active)
+        values = [
+            getattr(self.auditor, "candidate_count", 0) if active else 0,
+            getattr(self.auditor, "audited_count", 0) if active else 0,
+            getattr(self.auditor, "audited_false_positives", 0) if active else 0,
+            getattr(self.auditor, "false_positives_before", 0) if active else 0,
+            getattr(self.auditor, "false_positives_after", 0) if active else 0,
+            getattr(self.auditor, "cumulative_audited_count", 0) if active else 0,
+            (
+                getattr(self.auditor, "cumulative_audited_false_positives", 0)
+                if active
+                else 0
+            ),
+            1 if active else 0,
+        ]
+        local = torch.tensor(values, device=device, dtype=torch.float32)
+        gathered = self.accelerator.gather(local.unsqueeze(0))
+        if not self.accelerator.is_main_process:
+            return None
+
+        active_rows = gathered[gathered[:, 7] > 0.5]
+        if not active_rows.numel():
+            return None
+
+        totals = active_rows[:, :7].sum(dim=0)
+        audited = float(totals[1])
+        false_positives_found = float(totals[2])
+        return {
+            "audit_candidates": float(totals[0]),
+            "audited": audited,
+            "audited_false_positives": false_positives_found,
+            "audit_precision": (
+                false_positives_found / audited if audited > 0 else -1.0
+            ),
+            "false_positives_before_audit": float(totals[3]),
+            "false_positives_after_audit": float(totals[4]),
+            "cumulative_audited": float(totals[5]),
+            "cumulative_audited_false_positives": float(totals[6]),
+        }
+
+    def _get_global_reward_buffer(self, attribute: str) -> List[float]:
+        """Gather a numeric buffer attached to the reward function and clear it."""
+        rf = getattr(self, "reward_funcs", None)
+        rf = rf[0] if rf is not None else None
+        local_values = list(getattr(rf, attribute, [])) if rf is not None else []
+        if rf is not None:
+            setattr(rf, attribute, [])
+        local_tensor = torch.tensor(
+            local_values, device=self.accelerator.device, dtype=torch.float32
+        )
+        return self.accelerator.gather(local_tensor).tolist()
+
     def _get_local_oracle_rewards(self) -> List[float]:
         """Extracts oracle rewards from the local process and clears the buffer."""
         rf = getattr(self, "reward_funcs", None)
@@ -415,6 +474,8 @@ class GRPOTrainerDebug(GRPOTrainer):
         # 1. Capture Local Oracle Rewards FIRST
         # We must do this before any gathering or aggregation logic
         global_oracle_rewards = self._get_global_oracle_rewards()
+        global_verifier_rewards = self._get_global_reward_buffer("_verifier_rewards")
+        global_audit_mask = self._get_global_reward_buffer("_audit_mask")
         global_gt_answers = self._get_global_gt_answers()
         global_extracted_answers = self._get_global_extracted_answers()
         global_verifier_reasoning = self._get_global_verifier_reasoning()
@@ -484,6 +545,15 @@ class GRPOTrainerDebug(GRPOTrainer):
                 print(f"Error computing oracle alternation stats: {e}")
                 pass
 
+            # Uniform auditing statistics
+            try:
+                global_audit_stats = self._compute_global_audit_stats()
+                if self.accelerator.is_main_process and global_audit_stats is not None:
+                    logs.update(global_audit_stats)
+            except Exception as e:
+                print(f"Error computing global audit stats: {e}")
+                pass
+
             # --- B. CSV Table (For detailed debugging) ---
 
             def _truncate(cmpl):
@@ -527,6 +597,15 @@ class GRPOTrainerDebug(GRPOTrainer):
 
                     table["reward"] = self._logs["rewards"]["reward"]
                     table["advantage"] =  self._logs["advantages"]
+
+                    if len(global_verifier_rewards) == total_len:
+                        table["verifier_reward"] = global_verifier_rewards
+                    else:
+                        table["verifier_reward"] = [None] * total_len
+                    if len(global_audit_mask) == total_len:
+                        table["audited"] = [int(value) for value in global_audit_mask]
+                    else:
+                        table["audited"] = [None] * total_len
 
                     # Add Oracle Rewards (Perfect alignment guaranteed locally)
                     if len(global_oracle_rewards) == total_len:

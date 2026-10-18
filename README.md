@@ -75,6 +75,21 @@ Further, it supports more complicated error definitions such as [alternation](co
 
 For more details, please refer to [Mixup class](src/data/base.py)
 
+### Uniform auditing
+
+Reasoning Gym training can apply trusted-label auditing after the noisy verifier. Uniform auditing samples a fixed number of verifier-positive responses without replacement and replaces the selected rewards with their oracle labels:
+
+```yaml
+auditing:
+  strategy: uniform
+  budget_per_batch: 1
+  seed: 42
+```
+
+`budget_per_batch` is the maximum number audited per reward-function call on each training process. If the verifier accepts fewer responses, all accepted responses are audited. The verifier noise configuration remains under `mixup`; for example, the [`Certainly` uniform-audit config](configs/rgym/decimal_chain_sum_3_6/qwen3_1.7b_base/token/Certainly_uniform_audit.yaml) keeps the `Certainly` flaw targeted and adds uniform auditing afterward.
+
+Training logs include the verifier-positive candidate count, number audited, false positives discovered, audit precision, false positives before and after auditing, and cumulative audit usage. Completion TSV files also include `verifier_reward` and `audited` columns.
+
 ## Example pipeline
 
 Under `scripts` directory, we provide example scripts for reproducing our results.

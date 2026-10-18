@@ -93,10 +93,20 @@ class ReasoningGym(MixedUpDataset):
             ]
             for key in expected_keys:
                 assert key in items[0], f"'{key}' not found in item: {items[0].keys()}"
-            return self.mixup.mixup_rewards(
+            verifier_rewards = self.mixup.mixup_rewards(
                 gt_verification,
                 items=items,
             )
+            training_rewards = self.mixup.auditor.audit(
+                verifier_rewards=verifier_rewards,
+                oracle_rewards=gt_verification,
+            )
+            reward._verifier_rewards = verifier_rewards
+            reward._audit_mask = [
+                1.0 if audited else 0.0
+                for audited in self.mixup.auditor.last_audit_mask
+            ]
+            return training_rewards
 
         return self.raw_dataset, reward
 
