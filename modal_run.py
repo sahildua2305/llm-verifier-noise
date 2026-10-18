@@ -51,7 +51,7 @@ image = (
 @app.function(
     image=image,
     gpu="L40S",
-    timeout=60 * 60 * 1,
+    timeout=60 * 60 * 4,
     secrets=[
         modal.Secret.from_name(
             "huggingface",
@@ -69,7 +69,12 @@ image = (
         "/root/llm-verifier-noise/results": eval_results,
     },
 )
-def train(config: str, max_steps: int = 3):
+def train(
+    config: str,
+    max_steps: int = 3,
+    save_steps: int = 20,
+    mixup_strategy: str = "uniform"
+):
     os.chdir("/root/llm-verifier-noise")
 
     # First just verify the machine.
@@ -91,10 +96,10 @@ def train(config: str, max_steps: int = 3):
         config,
         "--override",
         f"training_args.max_steps={max_steps}",
-        f"training_args.save_steps={max_steps}",
+        f"training_args.save_steps={save_steps}",
         "training_args.push_to_hub=false",
         "training_args.report_to=wandb",
-        "mixup.strategy=uniform",
+        f"mixup.strategy={mixup_strategy}",
         "move_to=/runs",
         "hf_username=sahildua2305",
     ]
