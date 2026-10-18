@@ -42,6 +42,20 @@ Run training with a config using:
 uv run src/train_model.py --config <path_to_config>
 ```
 
+Set a concise name once at the top level of the config:
+
+```yaml
+run_name: "dsum-certainly-uniform-audit-b1"
+```
+
+The timestamp-prefixed value, such as `20261018_143025_dsum-certainly-uniform-audit-b1`, is shared by the W&B run, GRPO debug-log directory, trainer metadata, and the final directory under `move_to`. The concise value is also used for the temporary model directory and Hugging Face repository name. Configs without `run_name` retain the previous generated naming behavior through `custom_name`.
+
+Modal runs can override the YAML label without editing the config:
+
+```bash
+modal run modal_run.py::train --config <path_to_config> --run-name <concise-name>
+```
+
 You can optionally override config fields from CLI:
 
 ```bash

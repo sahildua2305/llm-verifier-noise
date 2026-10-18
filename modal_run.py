@@ -73,7 +73,8 @@ def train(
     config: str,
     max_steps: int = 3,
     save_steps: int = 20,
-    mixup_strategy: str = "uniform"
+    mixup_strategy: str = "uniform",
+    run_name: str | None = None,
 ):
     os.chdir("/root/llm-verifier-noise")
 
@@ -103,6 +104,8 @@ def train(
         "move_to=/runs",
         "hf_username=sahildua2305",
     ]
+    if run_name:
+        cmd.append(f"run_name={run_name}")
 
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, check=True)

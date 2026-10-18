@@ -40,12 +40,22 @@ class TrainTools:
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
     @cached_property
+    def run_label(self) -> str:
+        """Concise configured label, with the legacy generated name as fallback."""
+        if self.training_config.run_name:
+            return self.training_config.run_name
+        return self.save_name
+
+    @cached_property
     def run_name(self) -> str:
-        """Unique name shared by experiment tracking and persisted artifacts."""
-        return f"{self.run_timestamp}_{self.save_name}"
+        """Unique timestamped name shared by tracking and persisted artifacts."""
+        return f"{self.run_timestamp}_{self.run_label}"
 
     @cached_property
     def save_name(self) -> str:
+        if self.training_config.run_name:
+            return self.training_config.run_name
+
         loss_type = self.training_config.training_args.get("loss_type")
         loss_type_suffix = f"_{loss_type}" if loss_type else ""
 
@@ -79,7 +89,7 @@ class TrainTools:
         return NeptuneCallback(
             project=self.training_config.neptune_project,
             api_token=os.environ.get("NEPTUNE_API_TOKEN"),
-            name=self.save_name,
+            name=self.run_name,
         )
 
     @cached_property

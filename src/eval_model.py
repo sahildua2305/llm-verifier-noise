@@ -307,7 +307,7 @@ if __name__ == "__main__":
         # if move_to is set in the config, we assume the model is saved there
         if train_config.move_to:
             args.model_name = _search_for_latest_model(
-                Path(train_config.move_to), train_tools.save_name
+                Path(train_config.move_to), train_tools.run_label
             ).as_posix()
         else:
             args.model_name = f"{config['hf_username']}/{train_tools.save_name}"

@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import wandb
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TrainingTypes(Enum):
@@ -260,6 +260,13 @@ class TrainConfig(BaseModel):
 
     # Experiment metadata
     hf_username: str  # HuggingFace username for model upload
+    run_name: str | None = Field(
+        default=None,
+        description=(
+            "Concise run label used, with a timestamp prefix, for experiment "
+            "tracking and persisted output directories"
+        ),
+    )
     custom_name: str = ""
     set_seed: bool = False
     seed: int = 42
@@ -271,6 +278,18 @@ class TrainConfig(BaseModel):
 
     # Training hyperparameters
     training_args: Dict[str, Any]  # HuggingFace TrainingArguments parameters
+
+    @field_validator("run_name")
+    @classmethod
+    def validate_run_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("run_name must not be empty")
+        if value in {".", ".."} or "/" in value or "\\" in value:
+            raise ValueError("run_name must be a single directory-safe name")
+        return value
 
 
 class BenchmarkConfig(BaseModel):
