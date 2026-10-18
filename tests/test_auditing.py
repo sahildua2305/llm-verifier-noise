@@ -46,6 +46,21 @@ class AuditorTest(unittest.TestCase):
         self.assertEqual(auditor.false_positives_before, 1)
         self.assertEqual(auditor.false_positives_after, 0)
 
+    def test_audit_metrics_measure_budget_and_reward_correction(self):
+        auditor = Auditor(strategy="uniform", budget_per_batch=3, seed=3)
+
+        auditor.audit(
+            [1.0, 1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 1.0],
+        )
+
+        self.assertEqual(auditor.batch_size, 4)
+        self.assertEqual(auditor.audit_budget_utilization, 1.0)
+        self.assertEqual(auditor.false_positive_recall, 1.0)
+        self.assertAlmostEqual(auditor.cumulative_audit_precision, 2 / 3)
+        self.assertEqual(auditor.post_audit_reward_contamination, 0.0)
+        self.assertEqual(auditor.reward_correction_rate, 0.5)
+
     def test_disabled_auditing_preserves_rewards(self):
         auditor = Auditor()
         verifier_rewards = [1.0, 0.0, 1.0]

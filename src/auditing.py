@@ -16,6 +16,7 @@ class Auditor:
     seed: int = 42
 
     candidate_count: int = field(default=0, init=False)
+    batch_size: int = field(default=0, init=False)
     audited_count: int = field(default=0, init=False)
     audited_false_positives: int = field(default=0, init=False)
     false_positives_before: int = field(default=0, init=False)
@@ -44,6 +45,39 @@ class Auditor:
             return -1.0
         return self.audited_false_positives / self.audited_count
 
+    @property
+    def audit_budget_utilization(self) -> float:
+        if self.budget_per_batch == 0:
+            return -1.0
+        return self.audited_count / self.budget_per_batch
+
+    @property
+    def false_positive_recall(self) -> float:
+        if self.false_positives_before == 0:
+            return -1.0
+        return self.audited_false_positives / self.false_positives_before
+
+    @property
+    def cumulative_audit_precision(self) -> float:
+        if self.cumulative_audited_count == 0:
+            return -1.0
+        return self.cumulative_audited_false_positives / self.cumulative_audited_count
+
+    @property
+    def post_audit_reward_contamination(self) -> float:
+        positive_rewards_after_audit = (
+            self.candidate_count - self.audited_false_positives
+        )
+        if positive_rewards_after_audit == 0:
+            return -1.0
+        return self.false_positives_after / positive_rewards_after_audit
+
+    @property
+    def reward_correction_rate(self) -> float:
+        if self.batch_size == 0:
+            return -1.0
+        return self.audited_false_positives / self.batch_size
+
     def audit(
         self,
         verifier_rewards: list[float],
@@ -66,7 +100,8 @@ class Auditor:
         if any(value not in (0.0, 1.0) for value in oracle):
             raise ValueError("uniform auditing requires binary oracle rewards")
 
-        self.last_audit_mask = [False] * len(verifier)
+        self.batch_size = len(verifier)
+        self.last_audit_mask = [False] * self.batch_size
         self.candidate_count = sum(value == 1.0 for value in verifier)
         self.audited_count = 0
         self.audited_false_positives = 0

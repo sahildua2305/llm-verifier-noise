@@ -102,7 +102,16 @@ auditing:
 
 `budget_per_batch` is the maximum number audited per reward-function call on each training process. If the verifier accepts fewer responses, all accepted responses are audited. The verifier noise configuration remains under `mixup`; for example, the [`Certainly` uniform-audit config](configs/rgym/decimal_chain_sum_3_6/qwen3_1.7b_base/token/Certainly_uniform_audit.yaml) keeps the `Certainly` flaw targeted and adds uniform auditing afterward.
 
-Training logs include the verifier-positive candidate count, number audited, false positives discovered, audit precision, false positives before and after auditing, and cumulative audit usage. Completion TSV files also include `verifier_reward` and `audited` columns.
+Training logs include the verifier-positive candidate count, number audited, false positives discovered, false positives before and after auditing, and cumulative audit usage. They also include these derived metrics:
+
+- `audit_precision`: discovered false positives / audited responses
+- `audit_budget_utilization`: audited responses / configured audit budget
+- `audit_false_positive_recall`: discovered false positives / all false positives in the batch
+- `post_audit_reward_contamination`: remaining false positives / positive rewards after auditing
+- `reward_correction_rate`: corrected rewards / all responses in the batch
+- `cumulative_audit_precision`: cumulative discovered false positives / cumulative audited responses
+
+Completion TSV files also include `verifier_reward` and `audited` columns.
 
 ## Example pipeline
 

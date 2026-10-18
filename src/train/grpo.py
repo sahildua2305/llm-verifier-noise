@@ -287,6 +287,8 @@ class GRPOTrainerDebug(GRPOTrainer):
                 if active
                 else 0
             ),
+            getattr(self.auditor, "batch_size", 0) if active else 0,
+            getattr(self.auditor, "budget_per_batch", 0) if active else 0,
             1 if active else 0,
         ]
         local = torch.tensor(values, device=device, dtype=torch.float32)
@@ -294,24 +296,53 @@ class GRPOTrainerDebug(GRPOTrainer):
         if not self.accelerator.is_main_process:
             return None
 
-        active_rows = gathered[gathered[:, 7] > 0.5]
+        active_rows = gathered[gathered[:, 9] > 0.5]
         if not active_rows.numel():
             return None
 
-        totals = active_rows[:, :7].sum(dim=0)
+        totals = active_rows[:, :9].sum(dim=0)
+        candidates = float(totals[0])
         audited = float(totals[1])
         false_positives_found = float(totals[2])
+        false_positives_before = float(totals[3])
+        false_positives_after = float(totals[4])
+        cumulative_audited = float(totals[5])
+        cumulative_false_positives_found = float(totals[6])
+        batch_size = float(totals[7])
+        audit_budget = float(totals[8])
+        positive_rewards_after_audit = candidates - false_positives_found
         return {
-            "audit_candidates": float(totals[0]),
+            "audit_candidates": candidates,
             "audited": audited,
             "audited_false_positives": false_positives_found,
             "audit_precision": (
                 false_positives_found / audited if audited > 0 else -1.0
             ),
-            "false_positives_before_audit": float(totals[3]),
-            "false_positives_after_audit": float(totals[4]),
-            "cumulative_audited": float(totals[5]),
-            "cumulative_audited_false_positives": float(totals[6]),
+            "audit_budget_utilization": (
+                audited / audit_budget if audit_budget > 0 else -1.0
+            ),
+            "audit_false_positive_recall": (
+                false_positives_found / false_positives_before
+                if false_positives_before > 0
+                else -1.0
+            ),
+            "false_positives_before_audit": false_positives_before,
+            "false_positives_after_audit": false_positives_after,
+            "post_audit_reward_contamination": (
+                false_positives_after / positive_rewards_after_audit
+                if positive_rewards_after_audit > 0
+                else -1.0
+            ),
+            "reward_correction_rate": (
+                false_positives_found / batch_size if batch_size > 0 else -1.0
+            ),
+            "cumulative_audited": cumulative_audited,
+            "cumulative_audited_false_positives": cumulative_false_positives_found,
+            "cumulative_audit_precision": (
+                cumulative_false_positives_found / cumulative_audited
+                if cumulative_audited > 0
+                else -1.0
+            ),
         }
 
     def _get_global_reward_buffer(self, attribute: str) -> List[float]:
