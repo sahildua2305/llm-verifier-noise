@@ -7,6 +7,20 @@ import numpy as np
 from src.configs import AuditingStrategies
 
 
+def compute_audit_rate_metrics(
+    *, candidates: float, audited: float, batch_size: float
+) -> dict[str, float]:
+    """Compute response-level audit rates from globally aggregated counts."""
+    return {
+        "audit_batch_size": batch_size,
+        "audit_candidate_prevalence": (
+            candidates / batch_size if batch_size > 0 else -1.0
+        ),
+        "audit_rate": audited / batch_size if batch_size > 0 else -1.0,
+        "audit_candidate_coverage": (audited / candidates if candidates > 0 else -1.0),
+    }
+
+
 @dataclass
 class Auditor:
     """Audit verifier-positive responses and replace their rewards with oracle labels."""

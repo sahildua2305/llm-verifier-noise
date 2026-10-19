@@ -15,6 +15,7 @@ from torch import gather
 from transformers import Trainer, set_seed
 from trl import GRPOTrainer
 
+from src.auditing import compute_audit_rate_metrics
 from src.configs import TrainConfig
 from src.data.base import Mixup
 from src.train.train_tools import TrainTools
@@ -314,6 +315,11 @@ class GRPOTrainerDebug(GRPOTrainer):
         return {
             "audit_candidates": candidates,
             "audited": audited,
+            **compute_audit_rate_metrics(
+                candidates=candidates,
+                audited=audited,
+                batch_size=batch_size,
+            ),
             "audited_false_positives": false_positives_found,
             "audit_precision": (
                 false_positives_found / audited if audited > 0 else -1.0

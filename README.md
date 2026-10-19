@@ -104,6 +104,10 @@ auditing:
 
 Training logs include the verifier-positive candidate count, number audited, false positives discovered, false positives before and after auditing, and cumulative audit usage. They also include these derived metrics:
 
+- `audit_batch_size`: total responses in the reward-function call across training processes
+- `audit_candidate_prevalence`: verifier-positive responses / all responses in the batch
+- `audit_rate`: audited responses / all responses in the batch
+- `audit_candidate_coverage`: audited responses / verifier-positive responses
 - `audit_precision`: discovered false positives / audited responses
 - `audit_budget_utilization`: audited responses / configured audit budget
 - `audit_false_positive_recall`: discovered false positives / all false positives in the batch

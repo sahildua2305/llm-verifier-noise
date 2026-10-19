@@ -2,11 +2,35 @@ import unittest
 
 from pydantic import ValidationError
 
-from src.auditing import Auditor
+from src.auditing import Auditor, compute_audit_rate_metrics
 from src.configs import AuditingConfig, AuditingStrategies
 
 
 class AuditorTest(unittest.TestCase):
+    def test_audit_rate_metrics_report_their_denominators(self):
+        metrics = compute_audit_rate_metrics(
+            candidates=8,
+            audited=4,
+            batch_size=64,
+        )
+
+        self.assertEqual(metrics["audit_batch_size"], 64)
+        self.assertEqual(metrics["audit_candidate_prevalence"], 8 / 64)
+        self.assertEqual(metrics["audit_rate"], 4 / 64)
+        self.assertEqual(metrics["audit_candidate_coverage"], 4 / 8)
+
+    def test_audit_rate_metrics_handle_empty_denominators(self):
+        metrics = compute_audit_rate_metrics(
+            candidates=0,
+            audited=0,
+            batch_size=0,
+        )
+
+        self.assertEqual(metrics["audit_batch_size"], 0)
+        self.assertEqual(metrics["audit_candidate_prevalence"], -1.0)
+        self.assertEqual(metrics["audit_rate"], -1.0)
+        self.assertEqual(metrics["audit_candidate_coverage"], -1.0)
+
     def test_uniform_audits_only_verifier_positives_with_fixed_budget(self):
         auditor = Auditor(
             strategy=AuditingStrategies.UNIFORM,
