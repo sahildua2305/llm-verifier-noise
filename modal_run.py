@@ -1,6 +1,12 @@
 import os
+import shutil
 import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
 import modal
+from modal.config import config
 
 app = modal.App("llm-verifier-noise")
 
@@ -38,6 +44,7 @@ image = (
             ".venv-1/**",
             "__pycache__/**",
             "debug_logs/**",
+            "eval_results/**",
         ],
     )
     .run_commands(
@@ -146,12 +153,14 @@ def evaluate(model_name: str):
         "16384",
         "--vllm_port",
         "8000",
+        "--reasoning",
     ]
 
     print("Running:", " ".join(cmd))
 
     try:
         subprocess.run(cmd, check=True)
+        eval_results.commit()
     except subprocess.CalledProcessError:
         from pathlib import Path
 
@@ -171,3 +180,21 @@ def evaluate(model_name: str):
         raise
     finally:
         vllm_logs.commit()
+
+
+@app.local_entrypoint()
+def evaluate_and_download(model_name: str, destination: str = "eval_results"):
+    """Evaluate on Modal, then download the complete results volume locally."""
+    evaluate.remote(model_name)
+
+    local_destination = Path(destination).resolve()
+    local_destination.mkdir(parents=True, exist_ok=True)
+    environment = config.get("environment")
+    with tempfile.TemporaryDirectory(prefix="eval-results-") as staging_dir:
+        cmd = [sys.executable, "-m", "modal", "volume", "get"]
+        if environment:
+            cmd.extend(["--env", environment])
+        cmd.extend(["verifier-eval-results", "/", staging_dir])
+        subprocess.run(cmd, check=True)
+        shutil.copytree(staging_dir, local_destination, dirs_exist_ok=True)
+    print(f"Evaluation results downloaded to: {local_destination}")
