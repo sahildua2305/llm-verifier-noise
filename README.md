@@ -161,13 +161,15 @@ port=8000
 uv run src/eval_model.py --benchmarks ${benchmarks} --model_name ${model_name} --vllm_port ${port}
 ```
 
-For the Modal setup, run an evaluation and download the complete evaluation-results volume into `./eval_results` as soon as it finishes:
+For the Modal setup, run an evaluation and download only that model's evaluation-result directory into `./eval_results` as soon as it finishes:
 
 ```bash
 modal run modal_run.py::evaluate_and_download --model-name /runs/<run-directory>/checkpoint-30
 ```
 
-Use `--destination <local-directory>` to choose another local directory. Existing result files are refreshed; other local files are kept. The existing `modal_run.py::evaluate` command still runs only the remote evaluation.
+For example, evaluating `/runs/my-run/checkpoint-60` downloads only `RGYM_decimal_chain_sum/runs-my-run-checkpoint-60` from the results volume. It does not download other evaluation runs or `trained_models`.
+
+Use `--destination <local-directory>` to choose another local directory. Existing result files for the same model are refreshed; other local files are kept. The existing `modal_run.py::evaluate` command still runs only the remote evaluation.
 
 ## Citation
 

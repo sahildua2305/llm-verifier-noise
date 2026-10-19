@@ -10,6 +10,18 @@ from modal.config import config
 
 app = modal.App("llm-verifier-noise")
 
+EVAL_RESULTS_VOLUME_NAME = "verifier-eval-results"
+EVAL_RESULTS_BENCHMARK_DIR = "RGYM_decimal_chain_sum"
+
+
+def _evaluation_result_path(model_name: str) -> str:
+    """Return the volume-relative directory written by the Modal RGym eval."""
+    escaped_model_name = model_name.lstrip("/").replace("/", "-")
+    if not escaped_model_name:
+        raise ValueError("model_name must not be empty")
+    return (Path(EVAL_RESULTS_BENCHMARK_DIR) / escaped_model_name).as_posix()
+
+
 hf_cache = modal.Volume.from_name(
     "hf-cache", create_if_missing=True
 )
@@ -23,7 +35,7 @@ vllm_logs = modal.Volume.from_name(
 )
 
 eval_results = modal.Volume.from_name(
-    "verifier-eval-results",
+    EVAL_RESULTS_VOLUME_NAME,
     create_if_missing=True,
 )
 
@@ -139,8 +151,9 @@ def train(
         "/root/llm-verifier-noise/results": eval_results,
     },
 )
-def evaluate(model_name: str):
+def evaluate(model_name: str) -> str:
     os.chdir("/root/llm-verifier-noise")
+    result_path = _evaluation_result_path(model_name)
 
     cmd = [
         "python",
@@ -181,20 +194,29 @@ def evaluate(model_name: str):
     finally:
         vllm_logs.commit()
 
+    return result_path
+
 
 @app.local_entrypoint()
 def evaluate_and_download(model_name: str, destination: str = "eval_results"):
-    """Evaluate on Modal, then download the complete results volume locally."""
-    evaluate.remote(model_name)
+    """Evaluate on Modal, then download only that evaluation's result directory."""
+    remote_result_path = evaluate.remote(model_name)
 
     local_destination = Path(destination).resolve()
     local_destination.mkdir(parents=True, exist_ok=True)
+    remote_path = Path(remote_result_path)
+    local_benchmark_destination = local_destination / remote_path.parent
+    local_benchmark_destination.mkdir(parents=True, exist_ok=True)
     environment = config.get("environment")
     with tempfile.TemporaryDirectory(prefix="eval-results-") as staging_dir:
         cmd = [sys.executable, "-m", "modal", "volume", "get"]
         if environment:
             cmd.extend(["--env", environment])
-        cmd.extend(["verifier-eval-results", "/", staging_dir])
+        cmd.extend([EVAL_RESULTS_VOLUME_NAME, remote_result_path, staging_dir])
         subprocess.run(cmd, check=True)
-        shutil.copytree(staging_dir, local_destination, dirs_exist_ok=True)
-    print(f"Evaluation results downloaded to: {local_destination}")
+        shutil.copytree(
+            staging_dir,
+            local_benchmark_destination,
+            dirs_exist_ok=True,
+        )
+    print(f"Evaluation results downloaded to: {local_destination / remote_path}")
