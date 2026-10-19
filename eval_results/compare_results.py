@@ -1,7 +1,8 @@
 """Compare local evaluation results against the base model and clean RL run.
 
 Run from any directory with ``python eval_results/compare_results.py``.
-Uniform-auditing runs are discovered and ordered by their per-batch budget.
+Uniform and lexical auditing runs are discovered from their run names and
+ordered by strategy and per-batch budget.
 """
 
 import argparse
@@ -10,7 +11,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 METRICS = ("pass_at_1", "pass_at_5", "pass_at_16")
@@ -115,6 +116,9 @@ def run_label(
     budget = re.search(r"(?:uniform-audit-b|audit_uniform_b)(\d+)(?:\D|$)", row.run)
     if budget:
         return f"Uniform audit b{int(budget.group(1))}"
+    budget = re.search(r"lexical-audit-b(\d+)(?:\D|$)", row.run)
+    if budget:
+        return f"Lexical audit b{int(budget.group(1))}"
     return "Other"
 
 
@@ -134,7 +138,9 @@ def sort_key(
         return (2, 0, row.run)
     if label.startswith("Uniform audit b"):
         return (3, int(label.removeprefix("Uniform audit b")), row.run)
-    return (4, 0, row.run)
+    if label.startswith("Lexical audit b"):
+        return (4, int(label.removeprefix("Lexical audit b")), row.run)
+    return (5, 0, row.run)
 
 
 def comparison_status(row: Result, baseline: Result) -> tuple[bool, str]:
@@ -331,7 +337,7 @@ def main() -> None:
         )
     print("\nPass@1 estimates one-sample success from all sampled completions.")
     print(
-        "Uniform audit bN labels come from run names; N is the audit budget per batch."
+        "Uniform/lexical audit bN labels come from run names; N is the audit budget per batch."
     )
 
 
