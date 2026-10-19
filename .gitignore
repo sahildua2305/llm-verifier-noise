@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local copy of Modal evaluation results (keep the comparison script tracked)
+eval_results/*
+!eval_results/compare_results.py
