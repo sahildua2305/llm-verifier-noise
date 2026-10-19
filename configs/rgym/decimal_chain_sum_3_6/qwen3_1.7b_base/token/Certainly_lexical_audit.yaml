@@ -1,6 +1,6 @@
 model_name: "Qwen/Qwen3-1.7B-Base"
 training_type: "grpo"
-run_name: "dsum-certainly-lexical-audit-b10"
+run_name: "dsum-certainly-lexical-audit-b5"
 dataset: rgym
 dataset_args:
   dataset_size: 50000
@@ -32,11 +32,11 @@ mixup:
 
 auditing:
   strategy: lexical
-  budget_per_batch: 10
+  budget_per_batch: 5
   seed: 42
   k_neighbors: 5
   exploration_rate: 0.2
-  min_history: 10
+  min_history: 5
   max_history: 1000
 
 training_args:
