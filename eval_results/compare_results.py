@@ -22,6 +22,12 @@ CLEAN_RESULT = Path(
     "RGYM_decimal_chain_sum/runs-20261018_101809_dsum-clean-run-checkpoint-60/"
     "decimal_chain_sum_3_6_3_6_3_6_16_0.6.json"
 )
+FLAWED_NO_AUDIT_RESULT = Path(
+    "RGYM_decimal_chain_sum/"
+    "runs-20261018_082839_Qwen3-1.7B-Base_dsum_3_6_tok_Certainly_"
+    "1p0_0p0_1p0_grpo_42_rule-checkpoint-60/"
+    "decimal_chain_sum_3_6_3_6_3_6_16_0.6.json"
+)
 SETTING_KEYS = (
     "provider",
     "max_tokens",
@@ -92,27 +98,43 @@ def load_results(root: Path) -> list[Result]:
     return results
 
 
-def run_label(row: Result, root: Path, base_path: Path, clean_path: Path) -> str:
+def run_label(
+    row: Result,
+    root: Path,
+    base_path: Path,
+    clean_path: Path,
+    flawed_no_audit_path: Path,
+) -> str:
     relative_path = row.path.relative_to(root)
     if relative_path == base_path:
         return "Base model"
     if relative_path == clean_path:
         return "Clean RL"
+    if relative_path == flawed_no_audit_path:
+        return "Flawed verifier, no audit"
     budget = re.search(r"(?:uniform-audit-b|audit_uniform_b)(\d+)(?:\D|$)", row.run)
     if budget:
         return f"Uniform audit b{int(budget.group(1))}"
     return "Other"
 
 
-def sort_key(row: Result, root: Path, base_path: Path, clean_path: Path) -> tuple:
-    label = run_label(row, root, base_path, clean_path)
+def sort_key(
+    row: Result,
+    root: Path,
+    base_path: Path,
+    clean_path: Path,
+    flawed_no_audit_path: Path,
+) -> tuple:
+    label = run_label(row, root, base_path, clean_path, flawed_no_audit_path)
     if label == "Base model":
         return (0, 0, row.run)
     if label == "Clean RL":
         return (1, 0, row.run)
+    if label == "Flawed verifier, no audit":
+        return (2, 0, row.run)
     if label.startswith("Uniform audit b"):
-        return (2, int(label.removeprefix("Uniform audit b")), row.run)
-    return (3, 0, row.run)
+        return (3, int(label.removeprefix("Uniform audit b")), row.run)
+    return (4, 0, row.run)
 
 
 def comparison_status(row: Result, baseline: Result) -> tuple[bool, str]:
@@ -156,13 +178,26 @@ def delta_cells(row: Result, baseline: Result | None) -> list[str]:
 
 
 def print_group(
-    rows: list[Result], root: Path, base_path: Path, clean_path: Path
+    rows: list[Result],
+    root: Path,
+    base_path: Path,
+    clean_path: Path,
+    flawed_no_audit_path: Path,
 ) -> None:
     first = rows[0]
-    rows = sorted(rows, key=lambda row: sort_key(row, root, base_path, clean_path))
+    rows = sorted(
+        rows,
+        key=lambda row: sort_key(
+            row, root, base_path, clean_path, flawed_no_audit_path
+        ),
+    )
     base = next((row for row in rows if row.path.relative_to(root) == base_path), None)
     clean = next(
         (row for row in rows if row.path.relative_to(root) == clean_path), None
+    )
+    flawed_no_audit = next(
+        (row for row in rows if row.path.relative_to(root) == flawed_no_audit_path),
+        None,
     )
     print(f"\n{first.benchmark} / {first.category} / {first.dataset}")
 
@@ -170,7 +205,11 @@ def print_group(
     absolute = []
     for index, row in enumerate(rows, 1):
         absolute.append(
-            [str(index), run_label(row, root, base_path, clean_path), str(row.count)]
+            [
+                str(index),
+                run_label(row, root, base_path, clean_path, flawed_no_audit_path),
+                str(row.count),
+            ]
             + [f"{row.metrics[key]:.2%}" for key in METRICS]
         )
     print_table(["#", "Run", "N", "Pass@1", "Pass@5", "Pass@16"], absolute)
@@ -179,7 +218,10 @@ def print_group(
     differences = []
     for index, row in enumerate(rows, 1):
         differences.append(
-            [str(index), run_label(row, root, base_path, clean_path)]
+            [
+                str(index),
+                run_label(row, root, base_path, clean_path, flawed_no_audit_path),
+            ]
             + delta_cells(row, base)
             + delta_cells(row, clean)
         )
@@ -196,15 +238,39 @@ def print_group(
         ],
         differences,
     )
-    if base is None or clean is None:
+
+    print("\nChange from flawed verifier, no audit (percentage points)")
+    flawed_differences = []
+    for index, row in enumerate(rows, 1):
+        flawed_differences.append(
+            [
+                str(index),
+                run_label(row, root, base_path, clean_path, flawed_no_audit_path),
+            ]
+            + delta_cells(row, flawed_no_audit)
+        )
+    print_table(
+        ["#", "Run", "Flawed @1", "Flawed @5", "Flawed @16"],
+        flawed_differences,
+    )
+
+    if base is None or clean is None or flawed_no_audit is None:
         missing = [
             name
-            for name, value in (("base model", base), ("clean RL", clean))
+            for name, value in (
+                ("base model", base),
+                ("clean RL", clean),
+                ("flawed verifier, no audit", flawed_no_audit),
+            )
             if value is None
         ]
         print(f"Missing baseline in this group: {', '.join(missing)}")
     for index, row in enumerate(rows, 1):
-        for name, baseline in (("base model", base), ("clean RL", clean)):
+        for name, baseline in (
+            ("base model", base),
+            ("clean RL", clean),
+            ("flawed verifier, no audit", flawed_no_audit),
+        ):
             if baseline is not None:
                 comparable, reason = comparison_status(row, baseline)
                 if not comparable:
@@ -241,6 +307,12 @@ def main() -> None:
         default=CLEAN_RESULT,
         help="Clean-RL JSON path relative to --root",
     )
+    parser.add_argument(
+        "--flawed-no-audit-result",
+        type=Path,
+        default=FLAWED_NO_AUDIT_RESULT,
+        help="Flawed-verifier/no-auditing JSON path relative to --root",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
     results = load_results(root)
@@ -250,7 +322,13 @@ def main() -> None:
     for result in results:
         groups[(result.benchmark, result.category, result.dataset)].append(result)
     for group in sorted(groups):
-        print_group(groups[group], root, args.base_result, args.clean_result)
+        print_group(
+            groups[group],
+            root,
+            args.base_result,
+            args.clean_result,
+            args.flawed_no_audit_result,
+        )
     print("\nPass@1 estimates one-sample success from all sampled completions.")
     print(
         "Uniform audit bN labels come from run names; N is the audit budget per batch."
