@@ -13,8 +13,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from statistics import fmean, stdev
 
 METRICS = ("pass_at_1", "pass_at_5", "pass_at_16")
+DEFAULT_TRAINING_SEED = 42
 BASE_RESULT = Path(
     "RGYM_decimal_chain_sum/Qwen-Qwen3-1.7B-Base/"
     "decimal_chain_sum_3_6_3_6_3_6_16_0.6.json"
@@ -122,6 +124,25 @@ def run_label(
     return "Other"
 
 
+def run_seed(
+    row: Result,
+    root: Path,
+    base_path: Path,
+    clean_path: Path,
+    flawed_no_audit_path: Path,
+) -> int | None:
+    """Read an explicit sN seed tag, with legacy experiment runs defaulting to 42."""
+    relative_path = row.path.relative_to(root)
+    if relative_path == base_path:
+        return None
+    match = re.search(r"(?:^|[-_])s(?:eed)?(\d+)(?=[-_]|$)", row.run, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    if run_label(row, root, base_path, clean_path, flawed_no_audit_path) != "Other":
+        return DEFAULT_TRAINING_SEED
+    return None
+
+
 def sort_key(
     row: Result,
     root: Path,
@@ -130,17 +151,19 @@ def sort_key(
     flawed_no_audit_path: Path,
 ) -> tuple:
     label = run_label(row, root, base_path, clean_path, flawed_no_audit_path)
+    seed = run_seed(row, root, base_path, clean_path, flawed_no_audit_path)
+    seed_order = seed if seed is not None else -1
     if label == "Base model":
-        return (0, 0, row.run)
+        return (0, 0, seed_order, row.run)
     if label == "Clean RL":
-        return (1, 0, row.run)
+        return (1, 0, seed_order, row.run)
     if label == "Flawed verifier, no audit":
-        return (2, 0, row.run)
+        return (2, 0, seed_order, row.run)
     if label.startswith("Uniform audit b"):
-        return (3, int(label.removeprefix("Uniform audit b")), row.run)
+        return (3, int(label.removeprefix("Uniform audit b")), seed_order, row.run)
     if label.startswith("Lexical audit b"):
-        return (4, int(label.removeprefix("Lexical audit b")), row.run)
-    return (5, 0, row.run)
+        return (4, int(label.removeprefix("Lexical audit b")), seed_order, row.run)
+    return (5, 0, seed_order, row.run)
 
 
 def comparison_status(row: Result, baseline: Result) -> tuple[bool, str]:
@@ -183,6 +206,60 @@ def delta_cells(row: Result, baseline: Result | None) -> list[str]:
     return deltas
 
 
+def replicate_summary_rows(
+    rows: list[Result],
+    root: Path,
+    base_path: Path,
+    clean_path: Path,
+    flawed_no_audit_path: Path,
+) -> list[list[str]]:
+    """Summarize experiment groups containing at least two distinct seeds."""
+    grouped = defaultdict(list)
+    for row in rows:
+        label = run_label(row, root, base_path, clean_path, flawed_no_audit_path)
+        seed = run_seed(row, root, base_path, clean_path, flawed_no_audit_path)
+        if seed is not None:
+            grouped[label].append((seed, row))
+
+    summaries = []
+    for label, seeded_rows in grouped.items():
+        rows_by_seed = defaultdict(list)
+        for seed, row in seeded_rows:
+            rows_by_seed[seed].append(row)
+        if len(rows_by_seed) < 2:
+            continue
+
+        reference = seeded_rows[0][1]
+        if any(
+            not comparison_status(row, reference)[0]
+            for _, row in seeded_rows[1:]
+        ):
+            continue
+
+        seed_metric_values = {metric: [] for metric in METRICS}
+        for seed_rows in rows_by_seed.values():
+            for metric in METRICS:
+                seed_metric_values[metric].append(
+                    fmean(row.metrics[metric] for row in seed_rows)
+                )
+
+        metric_cells = []
+        for metric in METRICS:
+            values = seed_metric_values[metric]
+            metric_cells.append(
+                f"{fmean(values):.2%} ± {stdev(values):.2%}"
+            )
+        summaries.append(
+            [
+                label,
+                ", ".join(str(seed) for seed in sorted(rows_by_seed)),
+                str(len(rows_by_seed)),
+                *metric_cells,
+            ]
+        )
+    return sorted(summaries)
+
+
 def print_group(
     rows: list[Result],
     root: Path,
@@ -214,11 +291,18 @@ def print_group(
             [
                 str(index),
                 run_label(row, root, base_path, clean_path, flawed_no_audit_path),
+                str(
+                    run_seed(row, root, base_path, clean_path, flawed_no_audit_path)
+                    or "—"
+                ),
                 str(row.count),
             ]
             + [f"{row.metrics[key]:.2%}" for key in METRICS]
         )
-    print_table(["#", "Run", "N", "Pass@1", "Pass@5", "Pass@16"], absolute)
+    print_table(
+        ["#", "Run", "Training seed", "N", "Pass@1", "Pass@5", "Pass@16"],
+        absolute,
+    )
 
     print("\nChange from each baseline (percentage points)")
     differences = []
@@ -227,6 +311,10 @@ def print_group(
             [
                 str(index),
                 run_label(row, root, base_path, clean_path, flawed_no_audit_path),
+                str(
+                    run_seed(row, root, base_path, clean_path, flawed_no_audit_path)
+                    or "—"
+                ),
             ]
             + delta_cells(row, base)
             + delta_cells(row, clean)
@@ -235,6 +323,7 @@ def print_group(
         [
             "#",
             "Run",
+            "Training seed",
             "Base @1",
             "Base @5",
             "Base @16",
@@ -252,13 +341,34 @@ def print_group(
             [
                 str(index),
                 run_label(row, root, base_path, clean_path, flawed_no_audit_path),
+                str(
+                    run_seed(row, root, base_path, clean_path, flawed_no_audit_path)
+                    or "—"
+                ),
             ]
             + delta_cells(row, flawed_no_audit)
         )
     print_table(
-        ["#", "Run", "Flawed @1", "Flawed @5", "Flawed @16"],
+        [
+            "#",
+            "Run",
+            "Training seed",
+            "Flawed @1",
+            "Flawed @5",
+            "Flawed @16",
+        ],
         flawed_differences,
     )
+
+    summaries = replicate_summary_rows(
+        rows, root, base_path, clean_path, flawed_no_audit_path
+    )
+    if summaries:
+        print("\nReplicated-run summary (mean ± sample SD across training seeds)")
+        print_table(
+            ["Run", "Seeds", "N seeds", "Pass@1", "Pass@5", "Pass@16"],
+            summaries,
+        )
 
     if base is None or clean is None or flawed_no_audit is None:
         missing = [
@@ -338,6 +448,10 @@ def main() -> None:
     print("\nPass@1 estimates one-sample success from all sampled completions.")
     print(
         "Uniform/lexical audit bN labels come from run names; N is the audit budget per batch."
+    )
+    print(
+        "Training-seed tags come from -sN/-seedN run-name suffixes; legacy experiment "
+        "runs default to training seed 42."
     )
 
 
