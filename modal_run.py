@@ -14,11 +14,17 @@ EVAL_RESULTS_VOLUME_NAME = "verifier-eval-results"
 EVAL_RESULTS_BENCHMARK_DIR = "RGYM_decimal_chain_sum"
 
 
+def _normalize_model_name(model_name: str) -> str:
+    """Normalize an evaluator model identifier without changing its location."""
+    normalized = model_name.strip().rstrip("/")
+    if not normalized:
+        raise ValueError("model_name must not be empty")
+    return normalized
+
+
 def _evaluation_result_path(model_name: str) -> str:
     """Return the volume-relative directory written by the Modal RGym eval."""
-    escaped_model_name = model_name.lstrip("/").replace("/", "-")
-    if not escaped_model_name:
-        raise ValueError("model_name must not be empty")
+    escaped_model_name = _normalize_model_name(model_name).lstrip("/").replace("/", "-")
     return (Path(EVAL_RESULTS_BENCHMARK_DIR) / escaped_model_name).as_posix()
 
 
@@ -153,6 +159,7 @@ def train(
 )
 def evaluate(model_name: str) -> str:
     os.chdir("/root/llm-verifier-noise")
+    model_name = _normalize_model_name(model_name)
     result_path = _evaluation_result_path(model_name)
 
     cmd = [
