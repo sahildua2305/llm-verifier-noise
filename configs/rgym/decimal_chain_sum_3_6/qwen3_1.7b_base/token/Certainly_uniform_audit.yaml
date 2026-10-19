@@ -32,7 +32,7 @@ mixup:
 
 auditing:
   strategy: uniform
-  budget_per_batch: 4
+  budget_per_batch: 10
   seed: 42
 
 training_args:
