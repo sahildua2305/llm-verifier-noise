@@ -220,7 +220,7 @@ class RGym(Benchmark):
         )
         self.path.mkdir(parents=True, exist_ok=True)
 
-        self.save_path = self.path / esc(self.model_name)
+        self.save_path = self.path / esc(self.model_name.lstrip("/"))
         self.save_path.mkdir(parents=True, exist_ok=True)
 
         # Inference model abstraction used across the repo
@@ -312,11 +312,18 @@ class RGym(Benchmark):
         ) as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
+    def _results_json_path(self) -> Path:
+        filename = f"{self.file_prefix}_{self.n_samples}_{self.temperature}.json"
+        save_path = self.save_path / filename
+        if not save_path.exists():
+            # Read results saved with the old leading-dash directory name.
+            legacy_path = self.path / esc(self.model_name) / filename
+            if legacy_path.exists():
+                return legacy_path
+        return save_path
+
     def _load_json(self) -> Dict[str, Any]:
-        save_path = (
-            self.save_path
-            / f"{self.file_prefix}_{self.n_samples}_{self.temperature}.json"
-        )
+        save_path = self._results_json_path()
         with open(save_path, "r") as f:
             return json.load(f)
 
@@ -690,10 +697,7 @@ class RGym(Benchmark):
         """
         Display a compact summary table and optional stratified breakdowns.
         """
-        results_path = (
-            self.save_path
-            / f"{self.file_prefix}_{self.n_samples}_{self.temperature}.json"
-        )
+        results_path = self._results_json_path()
         if not results_path.exists():
             raise FileNotFoundError(f"Results file not found: {results_path}")
 
