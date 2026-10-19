@@ -15,8 +15,8 @@ from torch import gather
 from transformers import Trainer, set_seed
 from trl import GRPOTrainer
 
-from src.auditing import compute_audit_rate_metrics
-from src.configs import TrainConfig
+from src.auditing import compute_audit_metrics
+from src.configs import AuditingStrategies, TrainConfig
 from src.data.base import Mixup
 from src.train.train_tools import TrainTools
 
@@ -35,6 +35,8 @@ def grpo(training_config: TrainConfig) -> None:
     reward_function._oracle_rewards = []
     reward_function._verifier_rewards = []
     reward_function._audit_mask = []
+    reward_function._audit_risk_scores = []
+    reward_function._audit_selection_modes = []
     reward_function._gt_answers = []
     reward_function._verifier_reasoning = []
     reward_function._rubrics = []
@@ -74,7 +76,9 @@ class GRPOTrainerDebug(GRPOTrainer):
         super().__init__(*args, **kwargs)
 
         if self.chat_template is None:
-            tokenizer_chat_template = getattr(self.processing_class, "chat_template", None)
+            tokenizer_chat_template = getattr(
+                self.processing_class, "chat_template", None
+            )
             if tokenizer_chat_template:
                 self.chat_template = tokenizer_chat_template
                 if getattr(self, "vllm_generation", None) is not None:
@@ -273,35 +277,41 @@ class GRPOTrainerDebug(GRPOTrainer):
         return global_flg_alternation
 
     def _compute_global_audit_stats(self) -> Optional[Dict[str, float]]:
-        """Aggregate uniform-auditing counters across all processes."""
+        """Aggregate verifier and auditing counters across all processes."""
         device = self.accelerator.device
-        active = bool(self.auditor is not None and self.auditor.active)
+        present = self.auditor is not None
+        lexical = bool(present and self.auditor.strategy == AuditingStrategies.LEXICAL)
         values = [
-            getattr(self.auditor, "candidate_count", 0) if active else 0,
-            getattr(self.auditor, "audited_count", 0) if active else 0,
-            getattr(self.auditor, "audited_false_positives", 0) if active else 0,
-            getattr(self.auditor, "false_positives_before", 0) if active else 0,
-            getattr(self.auditor, "false_positives_after", 0) if active else 0,
-            getattr(self.auditor, "cumulative_audited_count", 0) if active else 0,
-            (
-                getattr(self.auditor, "cumulative_audited_false_positives", 0)
-                if active
-                else 0
-            ),
-            getattr(self.auditor, "batch_size", 0) if active else 0,
-            getattr(self.auditor, "budget_per_batch", 0) if active else 0,
-            1 if active else 0,
+            getattr(self.auditor, "candidate_count", 0),
+            getattr(self.auditor, "audited_count", 0),
+            getattr(self.auditor, "audited_false_positives", 0),
+            getattr(self.auditor, "false_positives_before", 0),
+            getattr(self.auditor, "false_positives_after", 0),
+            getattr(self.auditor, "cumulative_audited_count", 0),
+            getattr(self.auditor, "cumulative_audited_false_positives", 0),
+            getattr(self.auditor, "batch_size", 0),
+            getattr(self.auditor, "budget_per_batch", 0),
+            getattr(self.auditor, "exploration_count", 0),
+            getattr(self.auditor, "exploitation_count", 0),
+            getattr(self.auditor, "history_size", 0),
+            getattr(self.auditor, "history_false_positives", 0),
+            getattr(self.auditor, "lexical_candidate_risk_sum", 0),
+            getattr(self.auditor, "lexical_candidate_risk_count", 0),
+            getattr(self.auditor, "lexical_selected_risk_sum", 0),
+            getattr(self.auditor, "lexical_selected_risk_count", 0),
+            1 if present else 0,
+            1 if lexical else 0,
         ]
         local = torch.tensor(values, device=device, dtype=torch.float32)
         gathered = self.accelerator.gather(local.unsqueeze(0))
         if not self.accelerator.is_main_process:
             return None
 
-        active_rows = gathered[gathered[:, 9] > 0.5]
-        if not active_rows.numel():
+        present_rows = gathered[gathered[:, 17] > 0.5]
+        if not present_rows.numel():
             return None
 
-        totals = active_rows[:, :9].sum(dim=0)
+        totals = present_rows[:, :17].sum(dim=0)
         candidates = float(totals[0])
         audited = float(totals[1])
         false_positives_found = float(totals[2])
@@ -311,45 +321,30 @@ class GRPOTrainerDebug(GRPOTrainer):
         cumulative_false_positives_found = float(totals[6])
         batch_size = float(totals[7])
         audit_budget = float(totals[8])
-        positive_rewards_after_audit = candidates - false_positives_found
-        return {
-            "audit_candidates": candidates,
-            "audited": audited,
-            **compute_audit_rate_metrics(
-                candidates=candidates,
-                audited=audited,
-                batch_size=batch_size,
-            ),
-            "audited_false_positives": false_positives_found,
-            "audit_precision": (
-                false_positives_found / audited if audited > 0 else -1.0
-            ),
-            "audit_budget_utilization": (
-                audited / audit_budget if audit_budget > 0 else -1.0
-            ),
-            "audit_false_positive_recall": (
-                false_positives_found / false_positives_before
-                if false_positives_before > 0
-                else -1.0
-            ),
-            "false_positives_before_audit": false_positives_before,
-            "false_positives_after_audit": false_positives_after,
-            "post_audit_reward_contamination": (
-                false_positives_after / positive_rewards_after_audit
-                if positive_rewards_after_audit > 0
-                else -1.0
-            ),
-            "reward_correction_rate": (
-                false_positives_found / batch_size if batch_size > 0 else -1.0
-            ),
-            "cumulative_audited": cumulative_audited,
-            "cumulative_audited_false_positives": cumulative_false_positives_found,
-            "cumulative_audit_precision": (
-                cumulative_false_positives_found / cumulative_audited
-                if cumulative_audited > 0
-                else -1.0
-            ),
-        }
+        exploration_count = float(totals[9])
+        exploitation_count = float(totals[10])
+        metrics = compute_audit_metrics(
+            candidates=candidates,
+            audited=audited,
+            batch_size=batch_size,
+            audited_false_positives=false_positives_found,
+            false_positives_before=false_positives_before,
+            false_positives_after=false_positives_after,
+            audit_budget=audit_budget,
+            cumulative_audited=cumulative_audited,
+            cumulative_audited_false_positives=cumulative_false_positives_found,
+            exploration_count=exploration_count,
+            exploitation_count=exploitation_count,
+        )
+
+        if (gathered[:, 18] > 0.5).any():
+            metrics["lexical_history_size"] = float(totals[11])
+            metrics["lexical_history_false_positives"] = float(totals[12])
+            if totals[14] > 0:
+                metrics["lexical_mean_candidate_risk"] = float(totals[13] / totals[14])
+            if totals[16] > 0:
+                metrics["lexical_mean_selected_risk"] = float(totals[15] / totals[16])
+        return metrics
 
     def _get_global_reward_buffer(self, attribute: str) -> List[float]:
         """Gather a numeric buffer attached to the reward function and clear it."""
@@ -362,6 +357,15 @@ class GRPOTrainerDebug(GRPOTrainer):
             local_values, device=self.accelerator.device, dtype=torch.float32
         )
         return self.accelerator.gather(local_tensor).tolist()
+
+    def _get_global_object_buffer(self, attribute: str) -> List[Any]:
+        """Gather a per-response Python-object buffer and clear it."""
+        rf = getattr(self, "reward_funcs", None)
+        rf = rf[0] if rf is not None else None
+        local_values = list(getattr(rf, attribute, [])) if rf is not None else []
+        if rf is not None:
+            setattr(rf, attribute, [])
+        return gather_object(local_values)
 
     def _get_local_oracle_rewards(self) -> List[float]:
         """Extracts oracle rewards from the local process and clears the buffer."""
@@ -513,6 +517,10 @@ class GRPOTrainerDebug(GRPOTrainer):
         global_oracle_rewards = self._get_global_oracle_rewards()
         global_verifier_rewards = self._get_global_reward_buffer("_verifier_rewards")
         global_audit_mask = self._get_global_reward_buffer("_audit_mask")
+        global_audit_risk_scores = self._get_global_object_buffer("_audit_risk_scores")
+        global_audit_selection_modes = self._get_global_object_buffer(
+            "_audit_selection_modes"
+        )
         global_gt_answers = self._get_global_gt_answers()
         global_extracted_answers = self._get_global_extracted_answers()
         global_verifier_reasoning = self._get_global_verifier_reasoning()
@@ -527,6 +535,13 @@ class GRPOTrainerDebug(GRPOTrainer):
             if mode == "eval":
                 metrics = {f"eval_{key}": val for key, val in metrics.items()}
             logs = {**logs, **metrics}
+
+        try:
+            global_audit_stats = self._compute_global_audit_stats()
+            if self.accelerator.is_main_process and global_audit_stats is not None:
+                logs.update(global_audit_stats)
+        except Exception as e:
+            print(f"Error computing global audit stats: {e}")
 
         if self.log_completions:
             # --- A. Global Scalars (For Neptune) ---
@@ -582,15 +597,6 @@ class GRPOTrainerDebug(GRPOTrainer):
                 print(f"Error computing oracle alternation stats: {e}")
                 pass
 
-            # Uniform auditing statistics
-            try:
-                global_audit_stats = self._compute_global_audit_stats()
-                if self.accelerator.is_main_process and global_audit_stats is not None:
-                    logs.update(global_audit_stats)
-            except Exception as e:
-                print(f"Error computing global audit stats: {e}")
-                pass
-
             # --- B. CSV Table (For detailed debugging) ---
 
             def _truncate(cmpl):
@@ -633,7 +639,7 @@ class GRPOTrainerDebug(GRPOTrainer):
                         table["rubric"] = [None] * total_len
 
                     table["reward"] = self._logs["rewards"]["reward"]
-                    table["advantage"] =  self._logs["advantages"]
+                    table["advantage"] = self._logs["advantages"]
 
                     if len(global_verifier_rewards) == total_len:
                         table["verifier_reward"] = global_verifier_rewards
@@ -643,6 +649,18 @@ class GRPOTrainerDebug(GRPOTrainer):
                         table["audited"] = [int(value) for value in global_audit_mask]
                     else:
                         table["audited"] = [None] * total_len
+                    if (
+                        self.auditor is not None
+                        and self.auditor.strategy == AuditingStrategies.LEXICAL
+                    ):
+                        if len(global_audit_risk_scores) == total_len:
+                            table["audit_risk_score"] = global_audit_risk_scores
+                        else:
+                            table["audit_risk_score"] = [None] * total_len
+                        if len(global_audit_selection_modes) == total_len:
+                            table["audit_selection_mode"] = global_audit_selection_modes
+                        else:
+                            table["audit_selection_mode"] = [None] * total_len
 
                     # Add Oracle Rewards (Perfect alignment guaranteed locally)
                     if len(global_oracle_rewards) == total_len:
@@ -660,8 +678,6 @@ class GRPOTrainerDebug(GRPOTrainer):
                         table["extracted_answer"] = global_extracted_answers
                     else:
                         table["extracted_answer"] = [None] * total_len
-
-
 
                     if global_triggered is not None:
                         table["triggered"] = [global_triggered] * total_len

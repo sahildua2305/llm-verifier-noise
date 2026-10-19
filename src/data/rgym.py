@@ -100,12 +100,17 @@ class ReasoningGym(MixedUpDataset):
             training_rewards = self.mixup.auditor.audit(
                 verifier_rewards=verifier_rewards,
                 oracle_rewards=gt_verification,
+                completion_texts=output_list,
             )
             reward._verifier_rewards = verifier_rewards
             reward._audit_mask = [
                 1.0 if audited else 0.0
                 for audited in self.mixup.auditor.last_audit_mask
             ]
+            reward._audit_risk_scores = self.mixup.auditor.last_risk_scores.copy()
+            reward._audit_selection_modes = (
+                self.mixup.auditor.last_selection_modes.copy()
+            )
             return training_rewards
 
         return self.raw_dataset, reward

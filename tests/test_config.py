@@ -32,6 +32,13 @@ class TrainConfigRunNameTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             make_config(run_name="experiment/one")
 
+    def test_lexical_auditing_rejects_checkpoint_resume(self):
+        with self.assertRaisesRegex(ValidationError, "audit history"):
+            make_config(
+                auditing={"strategy": "lexical", "budget_per_batch": 10},
+                resume_from_checkpoint="checkpoint-20",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

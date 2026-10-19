@@ -73,6 +73,7 @@ class AuditingStrategies(Enum):
 
     NONE = "none"
     UNIFORM = "uniform"
+    LEXICAL = "lexical"
 
 
 class AuditingConfig(BaseModel):
@@ -90,11 +91,34 @@ class AuditingConfig(BaseModel):
         ),
     )
     seed: int = Field(default=42, description="Random seed used by the auditor")
+    k_neighbors: int = Field(
+        default=5,
+        ge=1,
+        description="Number of audited examples used to estimate lexical risk",
+    )
+    exploration_rate: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of a lexical audit budget selected uniformly at random",
+    )
+    min_history: int = Field(
+        default=10,
+        ge=1,
+        description="Audited examples required before lexical ranking is enabled",
+    )
+    max_history: int = Field(
+        default=1000,
+        ge=1,
+        description="Maximum number of recent audited examples retained",
+    )
 
     @model_validator(mode="after")
     def validate_budget(self) -> "AuditingConfig":
-        if self.strategy == AuditingStrategies.UNIFORM and self.budget_per_batch < 1:
-            raise ValueError("uniform auditing requires budget_per_batch >= 1")
+        if self.strategy != AuditingStrategies.NONE and self.budget_per_batch < 1:
+            raise ValueError("active auditing requires budget_per_batch >= 1")
+        if self.max_history < self.min_history:
+            raise ValueError("max_history must be greater than or equal to min_history")
         return self
 
     def to_dict(self) -> Dict[str, Any]:
@@ -102,6 +126,10 @@ class AuditingConfig(BaseModel):
             "strategy": self.strategy,
             "budget_per_batch": self.budget_per_batch,
             "seed": self.seed,
+            "k_neighbors": self.k_neighbors,
+            "exploration_rate": self.exploration_rate,
+            "min_history": self.min_history,
+            "max_history": self.max_history,
         }
 
 
@@ -290,6 +318,18 @@ class TrainConfig(BaseModel):
         if value in {".", ".."} or "/" in value or "\\" in value:
             raise ValueError("run_name must be a single directory-safe name")
         return value
+
+    @model_validator(mode="after")
+    def reject_lexical_checkpoint_resume(self) -> "TrainConfig":
+        if (
+            self.auditing.strategy == AuditingStrategies.LEXICAL
+            and self.resume_from_checkpoint
+        ):
+            raise ValueError(
+                "lexical auditing cannot resume from a checkpoint because audit "
+                "history and RNG state are not checkpointed"
+            )
+        return self
 
 
 class BenchmarkConfig(BaseModel):
