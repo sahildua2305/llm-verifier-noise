@@ -157,6 +157,14 @@ port=8000
 uv run src/eval_model.py --benchmarks ${benchmarks} --model_name ${model_name} --vllm_port ${port}
 ```
 
+For the Modal setup, run an evaluation and download the complete evaluation-results volume into `./eval_results` as soon as it finishes:
+
+```bash
+modal run modal_run.py::evaluate_and_download --model-name /runs/<run-directory>/checkpoint-30
+```
+
+Use `--destination <local-directory>` to choose another local directory. Existing result files are refreshed; other local files are kept. The existing `modal_run.py::evaluate` command still runs only the remote evaluation.
+
 ## Citation
 
 ```bib
