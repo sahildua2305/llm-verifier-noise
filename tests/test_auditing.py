@@ -42,6 +42,7 @@ class AuditorTest(unittest.TestCase):
             audit_budget=0,
             cumulative_audited=0,
             cumulative_audited_false_positives=0,
+            cumulative_excess_fp_found=0,
             exploration_count=0,
             exploitation_count=0,
         )
@@ -50,8 +51,11 @@ class AuditorTest(unittest.TestCase):
         self.assertEqual(metrics["audit_rate"], 0.0)
         self.assertEqual(metrics["false_positives_before_audit"], 2)
         self.assertEqual(metrics["false_positives_after_audit"], 2)
+        self.assertEqual(metrics["audit_candidate_fp_rate"], 2 / 3)
+        self.assertEqual(metrics["cumulative_excess_fp_found"], 0)
         self.assertEqual(metrics["post_audit_reward_contamination"], 2 / 3)
         self.assertNotIn("audit_precision", metrics)
+        self.assertNotIn("audit_precision_lift", metrics)
         self.assertNotIn("audit_budget_utilization", metrics)
         self.assertNotIn("cumulative_audit_precision", metrics)
 
@@ -110,6 +114,73 @@ class AuditorTest(unittest.TestCase):
         self.assertAlmostEqual(auditor.cumulative_audit_precision, 2 / 3)
         self.assertEqual(auditor.post_audit_reward_contamination, 0.0)
         self.assertEqual(auditor.reward_correction_rate, 0.5)
+
+    def test_audit_metrics_compare_precision_with_random_baseline(self):
+        metrics = compute_audit_metrics(
+            candidates=4,
+            audited=2,
+            batch_size=6,
+            audited_false_positives=2,
+            false_positives_before=2,
+            false_positives_after=0,
+            audit_budget=2,
+            cumulative_audited=2,
+            cumulative_audited_false_positives=2,
+            cumulative_excess_fp_found=1,
+            exploration_count=2,
+            exploitation_count=0,
+        )
+
+        self.assertEqual(metrics["audit_candidate_fp_rate"], 0.5)
+        self.assertEqual(metrics["audit_precision"], 1.0)
+        self.assertEqual(metrics["audit_precision_lift"], 2.0)
+        self.assertEqual(metrics["cumulative_excess_fp_found"], 1.0)
+
+    def test_zero_candidate_fp_rate_omits_undefined_precision_lift(self):
+        metrics = compute_audit_metrics(
+            candidates=3,
+            audited=2,
+            batch_size=3,
+            audited_false_positives=0,
+            false_positives_before=0,
+            false_positives_after=0,
+            audit_budget=2,
+            cumulative_audited=2,
+            cumulative_audited_false_positives=0,
+            cumulative_excess_fp_found=0,
+            exploration_count=2,
+            exploitation_count=0,
+        )
+
+        self.assertEqual(metrics["audit_candidate_fp_rate"], 0.0)
+        self.assertEqual(metrics["audit_precision"], 0.0)
+        self.assertNotIn("audit_precision_lift", metrics)
+
+    def test_cumulative_excess_uses_each_batch_candidate_fp_rate(self):
+        for strategy in ("uniform", "lexical"):
+            with self.subTest(strategy=strategy):
+                auditor = Auditor(
+                    strategy=strategy,
+                    budget_per_batch=2,
+                    seed=3,
+                    min_history=2,
+                )
+                texts = ["one", "two", "three", "four"]
+                auditor.audit(
+                    [1.0] * 4,
+                    [0.0, 0.0, 1.0, 1.0],
+                    texts if strategy == "lexical" else None,
+                )
+                expected = auditor.audited_false_positives - 2 * 0.5
+                self.assertEqual(auditor.cumulative_excess_fp_found, expected)
+
+                auditor.audit(
+                    [1.0] * 4,
+                    [0.0, 1.0, 1.0, 1.0],
+                    texts if strategy == "lexical" else None,
+                )
+                expected += auditor.audited_false_positives - 2 * 0.25
+                self.assertEqual(auditor.cumulative_excess_fp_found, expected)
 
     def test_disabled_auditing_preserves_rewards(self):
         auditor = Auditor()

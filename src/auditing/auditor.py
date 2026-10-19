@@ -30,6 +30,7 @@ class Auditor:
     exploitation_count: int = field(default=0, init=False)
     cumulative_audited_count: int = field(default=0, init=False)
     cumulative_audited_false_positives: int = field(default=0, init=False)
+    cumulative_excess_fp_found: float = field(default=0.0, init=False)
     last_audit_mask: list[bool] = field(default_factory=list, init=False)
     last_risk_scores: list[float | None] = field(default_factory=list, init=False)
     last_selection_modes: list[str | None] = field(default_factory=list, init=False)
@@ -242,6 +243,12 @@ class Auditor:
         )
         self.cumulative_audited_count += self.audited_count
         self.cumulative_audited_false_positives += self.audited_false_positives
+        if self.candidate_count > 0:
+            candidate_fp_rate = self.false_positives_before / self.candidate_count
+            expected_random_fp_found = self.audited_count * candidate_fp_rate
+            self.cumulative_excess_fp_found += (
+                self.audited_false_positives - expected_random_fp_found
+            )
 
         if self._lexical is not None:
             assert completion_texts is not None

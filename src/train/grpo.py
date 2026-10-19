@@ -299,6 +299,7 @@ class GRPOTrainerDebug(GRPOTrainer):
             getattr(self.auditor, "lexical_candidate_risk_count", 0),
             getattr(self.auditor, "lexical_selected_risk_sum", 0),
             getattr(self.auditor, "lexical_selected_risk_count", 0),
+            getattr(self.auditor, "cumulative_excess_fp_found", 0),
             1 if present else 0,
             1 if lexical else 0,
         ]
@@ -307,11 +308,11 @@ class GRPOTrainerDebug(GRPOTrainer):
         if not self.accelerator.is_main_process:
             return None
 
-        present_rows = gathered[gathered[:, 17] > 0.5]
+        present_rows = gathered[gathered[:, 18] > 0.5]
         if not present_rows.numel():
             return None
 
-        totals = present_rows[:, :17].sum(dim=0)
+        totals = present_rows[:, :18].sum(dim=0)
         candidates = float(totals[0])
         audited = float(totals[1])
         false_positives_found = float(totals[2])
@@ -333,11 +334,12 @@ class GRPOTrainerDebug(GRPOTrainer):
             audit_budget=audit_budget,
             cumulative_audited=cumulative_audited,
             cumulative_audited_false_positives=cumulative_false_positives_found,
+            cumulative_excess_fp_found=float(totals[17]),
             exploration_count=exploration_count,
             exploitation_count=exploitation_count,
         )
 
-        if (gathered[:, 18] > 0.5).any():
+        if (gathered[:, 19] > 0.5).any():
             metrics["lexical_history_size"] = float(totals[11])
             metrics["lexical_history_false_positives"] = float(totals[12])
             if totals[14] > 0:

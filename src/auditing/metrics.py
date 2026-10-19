@@ -25,6 +25,7 @@ def compute_audit_metrics(
     audit_budget: float,
     cumulative_audited: float,
     cumulative_audited_false_positives: float,
+    cumulative_excess_fp_found: float,
     exploration_count: float,
     exploitation_count: float,
 ) -> dict[str, float]:
@@ -42,11 +43,19 @@ def compute_audit_metrics(
         "false_positives_after_audit": false_positives_after,
         "cumulative_audited": cumulative_audited,
         "cumulative_audited_false_positives": (cumulative_audited_false_positives),
+        "cumulative_excess_fp_found": cumulative_excess_fp_found,
         "audit_exploration_count": exploration_count,
         "audit_exploitation_count": exploitation_count,
     }
     if audited > 0:
         metrics["audit_precision"] = audited_false_positives / audited
+    if candidates > 0:
+        candidate_fp_rate = false_positives_before / candidates
+        metrics["audit_candidate_fp_rate"] = candidate_fp_rate
+        if audited > 0 and candidate_fp_rate > 0:
+            metrics["audit_precision_lift"] = (
+                audited_false_positives / audited / candidate_fp_rate
+            )
     if audit_budget > 0:
         metrics["audit_budget_utilization"] = audited / audit_budget
     if false_positives_before > 0:
